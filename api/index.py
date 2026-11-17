@@ -28,4 +28,15 @@ def app(environ, start_response):
         environ["QUERY_STRING"] = urlencode(rest)
     elif environ.get("PATH_INFO", "").startswith("/api/index"):
         environ["PATH_INFO"] = "/"
-    return _flask(environ, start_response)
+    seen = {}
+
+    def sr(status, headers, exc_info=None):
+        seen["status"] = status
+        return start_response(status, headers, exc_info)
+
+    body = _flask(environ, sr)
+    if os.environ.get("CREW_DEBUG404") and seen.get("status", "").startswith("404"):
+        info = "\n".join(f"{k}={environ.get(k)}" for k in ("PATH_INFO", "QUERY_STRING", "REQUEST_URI", "RAW_URI", "SCRIPT_NAME", "HTTP_X_VERCEL_ID", "HTTP_X_MATCHED_PATH", "HTTP_X_VERCEL_DEPLOYMENT_URL"))
+        start_response("404 Not Found", [("Content-Type", "text/plain")])
+        return [info.encode()]
+    return body
