@@ -6,7 +6,7 @@ to platform-ready posts, and nothing moves forward without human approval.
 
 Scout (topics) -> Writer (script) -> Designer (thumbnail and shots) -> Publisher (per-platform posts) -> queue -> results
 
-## What works today
+### What works today
 - Accounts, brands in different niches, several channels per brand
 - Full agent pipeline with approve / redo-with-note at every stage, editable captions
 - Scheduling with a per-channel daily cap (default 3), cancel, "publish due" button
