@@ -2,7 +2,6 @@
 import json
 import os
 import secrets
-import sqlite3
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
@@ -44,9 +43,13 @@ def iso(dt):
 
 def create_app(test_config=None):
     app = Flask(__name__, instance_relative_config=True)
-    Path(app.instance_path).mkdir(parents=True, exist_ok=True)
+    try:
+        Path(app.instance_path).mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass  # read-only disk on serverless hosts; Postgres and SECRET_KEY are used there
     app.config.update(
         DATABASE=os.path.join(app.instance_path, "crew.sqlite"),
+        DATABASE_URL=os.environ.get("DATABASE_URL", ""),
         MAX_POSTS_PER_CHANNEL_PER_DAY=int(os.environ.get("MAX_POSTS_PER_CHANNEL_PER_DAY", "3")),
         SECRET_KEY=os.environ.get("SECRET_KEY") or _persistent_secret(app.instance_path),
         SESSION_COOKIE_HTTPONLY=True,
@@ -121,8 +124,8 @@ def create_app(test_config=None):
         conn = db.get_db()
         conn.execute(
             "INSERT INTO usage(user_id, month, calls, input_tokens, output_tokens) VALUES (?,?,1,?,?) "
-            "ON CONFLICT(user_id, month) DO UPDATE SET calls=calls+1, "
-            "input_tokens=input_tokens+excluded.input_tokens, output_tokens=output_tokens+excluded.output_tokens",
+            "ON CONFLICT(user_id, month) DO UPDATE SET calls=usage.calls+1, "
+            "input_tokens=usage.input_tokens+excluded.input_tokens, output_tokens=usage.output_tokens+excluded.output_tokens",
             (g.user["id"], month, usage.get("input", 0), usage.get("output", 0)),
         )
         conn.commit()
@@ -158,16 +161,17 @@ def create_app(test_config=None):
             else:
                 conn = db.get_db()
                 try:
-                    cur = conn.execute(
+                    user_id = conn.insert(
                         "INSERT INTO users(email, pw_hash, created_at) VALUES (?,?,?)",
                         (email, generate_password_hash(password), iso(utcnow())),
                     )
                     conn.commit()
-                except sqlite3.IntegrityError:
+                except db.IntegrityErrors:
+                    conn.rollback()
                     flash("That email is already registered.", "error")
                 else:
                     session.clear()
-                    session["uid"] = cur.lastrowid
+                    session["uid"] = user_id
                     return redirect(url_for("dashboard"))
         return render_template("auth.html", mode="register")
 
@@ -214,7 +218,7 @@ def create_app(test_config=None):
             flash("A brand needs a name and a niche.", "error")
             return redirect(url_for("dashboard"))
         conn = db.get_db()
-        cur = conn.execute(
+        new_id = conn.insert(
             "INSERT INTO brands(user_id,name,niche,audience,tone,rules,language,created_at) VALUES (?,?,?,?,?,?,?,?)",
             (
                 g.user["id"], name[:80], niche[:200], f.get("audience", "").strip()[:300],
@@ -223,7 +227,7 @@ def create_app(test_config=None):
             ),
         )
         conn.commit()
-        return redirect(url_for("brand_page", brand_id=cur.lastrowid))
+        return redirect(url_for("brand_page", brand_id=new_id))
 
     @app.route("/brands/<int:brand_id>")
     @login_required
@@ -301,12 +305,12 @@ def create_app(test_config=None):
         if ideas is None:
             return redirect(url_for("brand_page", brand_id=brand_id))
         conn = db.get_db()
-        cur = conn.execute(
+        new_id = conn.insert(
             "INSERT INTO runs(brand_id, stage, ideas_json, created_at) VALUES (?,?,?,?)",
             (brand_id, "ideas", json.dumps(ideas), iso(utcnow())),
         )
         conn.commit()
-        return redirect(url_for("run_page", run_id=cur.lastrowid))
+        return redirect(url_for("run_page", run_id=new_id))
 
     @app.route("/runs/<int:run_id>")
     @login_required
@@ -415,9 +419,9 @@ def create_app(test_config=None):
             when = start + timedelta(minutes=30 * i)
             day = when.strftime("%Y-%m-%d")
             count = conn.execute(
-                "SELECT COUNT(*) FROM posts WHERE channel_id=? AND substr(scheduled_at,1,10)=? AND status!='failed'",
+                "SELECT COUNT(*) AS n FROM posts WHERE channel_id=? AND substr(scheduled_at,1,10)=? AND status!='failed'",
                 (channel["id"], day),
-            ).fetchone()[0]
+            ).fetchone()["n"]
             if count >= cap:
                 flash(f"@{channel['handle']} on {channel['platform']} already has {cap} posts on {day}. Pick another day.", "error")
                 return redirect(url_for("run_page", run_id=run["id"]))
@@ -508,11 +512,14 @@ def create_app(test_config=None):
 
 def _persistent_secret(instance_path):
     path = Path(instance_path) / "secret_key"
-    if path.exists():
-        return path.read_text().strip()
-    key = secrets.token_hex(32)
-    path.write_text(key)
-    return key
+    try:
+        if path.exists():
+            return path.read_text().strip()
+        key = secrets.token_hex(32)
+        path.write_text(key)
+        return key
+    except OSError as exc:
+        raise RuntimeError("Set the SECRET_KEY environment variable (the disk is read-only).") from exc
 
 
 if __name__ == "__main__":

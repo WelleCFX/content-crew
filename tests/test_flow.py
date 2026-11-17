@@ -11,10 +11,20 @@ os.environ.pop("ANTHROPIC_API_KEY", None)
 from app import create_app  # noqa: E402
 
 
-@pytest.fixture()
-def client(tmp_path):
-    app = create_app({"TESTING": True, "DATABASE": str(tmp_path / "t.sqlite"), "SECRET_KEY": "test"})
-    return app.test_client()
+PG_URL = os.environ.get("TEST_DATABASE_URL", "")
+
+
+@pytest.fixture(params=["sqlite"] + (["postgres"] if PG_URL else []))
+def client(request, tmp_path):
+    config = {"TESTING": True, "DATABASE": str(tmp_path / "t.sqlite"), "SECRET_KEY": "test", "DATABASE_URL": ""}
+    if request.param == "postgres":
+        import psycopg
+
+        with psycopg.connect(PG_URL, autocommit=True) as conn:
+            conn.execute("DROP SCHEMA public CASCADE")
+            conn.execute("CREATE SCHEMA public")
+        config["DATABASE_URL"] = PG_URL
+    return create_app(config).test_client()
 
 
 def token(client):

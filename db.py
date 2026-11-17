@@ -1,4 +1,9 @@
-"""SQLite access and schema for Content Crew."""
+"""Database access for Content Crew.
+
+Local runs use SQLite. Set DATABASE_URL (a postgres:// URL) to use Postgres, which is what
+serverless hosts such as Vercel need, because their disk is not persistent.
+"""
+import os
 import sqlite3
 
 from flask import current_app, g
@@ -55,10 +60,10 @@ CREATE TABLE IF NOT EXISTS posts (
     published_at TEXT,
     external_id TEXT,
     error TEXT,
-    views INTEGER NOT NULL DEFAULT 0,
-    likes INTEGER NOT NULL DEFAULT 0,
-    followers_gained INTEGER NOT NULL DEFAULT 0,
-    leads INTEGER NOT NULL DEFAULT 0
+    views BIGINT NOT NULL DEFAULT 0,
+    likes BIGINT NOT NULL DEFAULT 0,
+    followers_gained BIGINT NOT NULL DEFAULT 0,
+    leads BIGINT NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS usage (
@@ -66,8 +71,8 @@ CREATE TABLE IF NOT EXISTS usage (
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     month TEXT NOT NULL,
     calls INTEGER NOT NULL DEFAULT 0,
-    input_tokens INTEGER NOT NULL DEFAULT 0,
-    output_tokens INTEGER NOT NULL DEFAULT 0,
+    input_tokens BIGINT NOT NULL DEFAULT 0,
+    output_tokens BIGINT NOT NULL DEFAULT 0,
     UNIQUE(user_id, month)
 );
 
@@ -76,11 +81,94 @@ CREATE INDEX IF NOT EXISTS idx_brands_user ON brands(user_id);
 """
 
 
+def _pg_schema():
+    return (
+        SCHEMA.replace("INTEGER PRIMARY KEY", "BIGSERIAL PRIMARY KEY")
+        .replace("INTEGER NOT NULL REFERENCES", "BIGINT NOT NULL REFERENCES")
+    )
+
+
+class _Sqlite:
+    def __init__(self, path):
+        self.c = sqlite3.connect(path)
+        self.c.row_factory = sqlite3.Row
+        self.c.execute("PRAGMA foreign_keys = ON")
+
+    def execute(self, sql, params=()):
+        return self.c.execute(sql, params)
+
+    def executemany(self, sql, seq):
+        return self.c.executemany(sql, seq)
+
+    def insert(self, sql, params=()):
+        return self.c.execute(sql, params).lastrowid
+
+    def executescript(self, script):
+        self.c.executescript(script)
+
+    def commit(self):
+        self.c.commit()
+
+    def rollback(self):
+        self.c.rollback()
+
+    def close(self):
+        self.c.close()
+
+
+class _Postgres:
+    def __init__(self, url):
+        import psycopg
+        from psycopg.rows import dict_row
+
+        self.c = psycopg.connect(url, row_factory=dict_row)
+
+    @staticmethod
+    def _q(sql):
+        return sql.replace("?", "%s")
+
+    def execute(self, sql, params=()):
+        return self.c.execute(self._q(sql), params)
+
+    def executemany(self, sql, seq):
+        cur = self.c.cursor()
+        cur.executemany(self._q(sql), seq)
+        return cur
+
+    def insert(self, sql, params=()):
+        return self.c.execute(self._q(sql) + " RETURNING id", params).fetchone()["id"]
+
+    def executescript(self, script):
+        self.c.execute(_pg_schema() if script is SCHEMA else script)
+
+    def commit(self):
+        self.c.commit()
+
+    def rollback(self):
+        self.c.rollback()
+
+    def close(self):
+        self.c.close()
+
+
+def _integrity_errors():
+    errors = [sqlite3.IntegrityError]
+    try:
+        import psycopg
+
+        errors.append(psycopg.errors.UniqueViolation)
+    except ImportError:
+        pass
+    return tuple(errors)
+
+
+IntegrityErrors = _integrity_errors()
+
+
 def get_db():
     if "db" not in g:
-        g.db = sqlite3.connect(current_app.config["DATABASE"])
-        g.db.row_factory = sqlite3.Row
-        g.db.execute("PRAGMA foreign_keys = ON")
+        url = current_app.config.get("DATABASE_URL") or os.environ.get("DATABASE_URL", "")
+        g.db = _Postgres(url) if url else _Sqlite(current_app.config["DATABASE"])
     return g.db
 
 
@@ -91,5 +179,6 @@ def close_db(_error=None):
 
 
 def init_db():
-    get_db().executescript(SCHEMA)
-    get_db().commit()
+    conn = get_db()
+    conn.executescript(SCHEMA)
+    conn.commit()

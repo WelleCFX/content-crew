@@ -27,8 +27,20 @@ python app.py
 ```
 Open http://127.0.0.1:5000, create an account, add a brand and a channel, start a run.
 
-Set `ANTHROPIC_API_KEY` (see `.env.example`) for real agents. Tests: `python -m pytest`.
+Set `ANTHROPIC_API_KEY` (see `.env.example`) for real agents.
 
-## Deploy
-`gunicorn wsgi:app` behind HTTPS. Set `SECRET_KEY`. SQLite lives in `instance/`; back it up
-or move to Postgres before running real customers.
+## Deploy on Vercel
+Vercel's disk is not persistent, so the app needs Postgres there.
+1. Create a Postgres database (for example Neon, available from the Vercel Storage tab) and copy its connection string.
+2. In Vercel choose Add New > Project and import this GitHub repo.
+3. Add environment variables: `DATABASE_URL` (the Postgres string), `SECRET_KEY` (any long random text), `ANTHROPIC_API_KEY`.
+4. Deploy. Tables are created on first start.
+
+`vercel.json` routes every request to `api/index.py` and allows 60 seconds per request because
+agent calls can be slow. Your Vercel plan may cap that, and long runs may need a plan that allows it.
+
+## Deploy elsewhere
+`gunicorn wsgi:app` behind HTTPS with `SECRET_KEY` and `DATABASE_URL` set.
+
+## Tests
+`pip install -r requirements-dev.txt`, then `python -m pytest`. Set `TEST_DATABASE_URL` to also run the suite against Postgres.
