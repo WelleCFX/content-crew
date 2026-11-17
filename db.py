@@ -121,7 +121,7 @@ class _Postgres:
         import psycopg
         from psycopg.rows import dict_row
 
-        self.c = psycopg.connect(url, row_factory=dict_row)
+        self.c = psycopg.connect(url, row_factory=dict_row, prepare_threshold=None)  # safe behind pgbouncer (Neon pooled URLs)
 
     @staticmethod
     def _q(sql):
