@@ -1,43 +1,39 @@
 {% extends "base.html" %}
+{% from "_ui.html" import crew, pico with context %}
 {% block title %}Run {{ run.id }} · {{ brand.name }}{% endblock %}
 {% block content %}
-<div>
-  <p class="notice"><a href="{{ url_for('brand_page', brand_id=brand.id) }}">{{ brand.name }}</a></p>
-  <h1>{{ v.topic.title if v.topic else 'New run' }}</h1>
-</div>
+<a class="back" href="{{ url_for('brand_page', brand_id=brand.id) }}">‹ {{ brand.name }}</a>
+<h1 class="runtitle">{{ v.topic.title if v.topic else 'New run' }}</h1>
 
-{% set labels = {'ideas': 'Scout', 'script': 'Writer', 'design': 'Designer', 'pack': 'Publisher', 'done': 'Done'} %}
-<div class="steps">
-  {% for s in stages %}
-  <div class="step {{ 'now' if s == run.stage else ('past' if stages.index(s) < stages.index(run.stage) else '') }}">0{{ loop.index }} {{ labels[s] }}</div>
-  {% endfor %}
-</div>
+{{ crew(run.stage) }}
 
 {% macro redo_form() %}
-<form method="post" action="{{ url_for('redo', run_id=run.id) }}" class="field">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <label for="note">Change request (optional)</label>
-  <textarea id="note" name="note" maxlength="400" placeholder="For example: make it shorter, or use a dentist as the example"></textarea>
-  <div><button type="submit">Redo with my note</button></div>
-</form>
+<details class="more">
+  <summary>Ask for changes</summary>
+  <form method="post" action="{{ url_for('redo', run_id=run.id) }}" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="field"><label for="note">What should change?</label>
+      <textarea id="note" name="note" maxlength="400" placeholder="Shorter, or use a dentist as the example"></textarea></div>
+    <button type="submit">Redo</button>
+  </form>
+</details>
 {% endmacro %}
 
 {% macro approve_form(label) %}
 <form method="post" action="{{ url_for('approve', run_id=run.id) }}">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <button class="primary" type="submit">{{ label }}</button>
+  <button class="primary go" type="submit">{{ label }}</button>
 </form>
 {% endmacro %}
 
 {% if run.stage == 'ideas' %}
-<section class="panel">
-  <h3>Pick a topic</h3>
-  <p class="notice">Approve one idea and the Writer takes it from there.</p>
+<section class="block">
+  <h2>Pick a topic</h2>
   {% for idea in v.ideas %}
-  <div class="card">
-    <strong>{{ idea.title }}</strong>
-    <span class="hook">"{{ idea.hook }}"</span>
-    <span class="notice">{{ idea.why }}</span>
+  <div class="card idea">
+    <b>{{ idea.title }}</b>
+    <span class="hook">“{{ idea.hook }}”</span>
+    <details class="more"><summary>Why this</summary><p class="notice">{{ idea.why }}</p></details>
     <form method="post" action="{{ url_for('pick_topic', run_id=run.id) }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="idx" value="{{ loop.index0 }}">
@@ -47,60 +43,57 @@
   {% endfor %}
   <form method="post" action="{{ url_for('new_ideas', run_id=run.id) }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <button class="ghost" type="submit">Get five new ideas</button>
+    <button class="ghost" type="submit">↻ Five new ideas</button>
   </form>
 </section>
 
 {% elif run.stage == 'script' %}
-<section class="panel">
-  <h3>Script</h3>
-  <div class="card"><span class="label">Hook</span><span class="hookline">{{ v.script.hook }}</span></div>
-  <div class="card"><span class="label">Beats</span><ol class="beats">{% for b in v.script.beats %}<li>{{ b }}</li>{% endfor %}</ol></div>
-  <div class="card"><span class="label">Call to action</span><span>{{ v.script.cta }}</span></div>
-  <div class="card"><span class="label">Caption</span><span>{{ v.script.caption }}</span></div>
-  {{ redo_form() }}
+<section class="block">
+  <h2>Script</h2>
+  <div class="card hero-card"><small class="label">Hook</small><span class="hookline">{{ v.script.hook }}</span></div>
+  <div class="card"><small class="label">Beats</small><ol class="beats">{% for b in v.script.beats %}<li>{{ b }}</li>{% endfor %}</ol></div>
+  <div class="card"><small class="label">Call to action</small><span>{{ v.script.cta }}</span></div>
+  <details class="more"><summary>Caption</summary><p>{{ v.script.caption }}</p></details>
   {{ approve_form('Approve script') }}
+  {{ redo_form() }}
 </section>
 
 {% elif run.stage == 'design' %}
-<section class="panel">
-  <h3>Thumbnail and shot list</h3>
+<section class="block">
+  <h2>Thumbnail and shot list</h2>
   <div class="thumb">{{ v.design.thumbnailText }}</div>
   <p class="notice">{{ v.design.thumbnailVisual }}</p>
-  <div class="tablewrap"><table>
-    <thead><tr><th>Time</th><th>Visual</th><th>On-screen text</th></tr></thead>
-    <tbody>{% for s in v.design.shots %}<tr><td class="t">{{ s.time }}</td><td>{{ s.visual }}</td><td>{{ s.onScreenText }}</td></tr>{% endfor %}</tbody>
-  </table></div>
-  {{ redo_form() }}
+  <div class="list">
+    {% for s in v.design.shots %}
+    <div class="item"><span class="chip">{{ s.time }}</span><span class="grow"><b>{{ s.visual }}</b>{% if s.onScreenText %}<small>“{{ s.onScreenText }}”</small>{% endif %}</span></div>
+    {% endfor %}
+  </div>
   {{ approve_form('Approve design') }}
+  {{ redo_form() }}
 </section>
 
 {% elif run.stage == 'pack' %}
-<section class="panel">
-  <h3>Posts by platform</h3>
-  <p class="notice">Edit anything you like. Approving schedules one post per channel, 30 minutes apart, with at most {{ cap }} posts per channel per day. Times are UTC.</p>
-  <form method="post" action="{{ url_for('approve', run_id=run.id) }}" class="panel" style="border:0;padding:0">
+<section class="block">
+  <h2>Posts by platform</h2>
+  <form method="post" action="{{ url_for('approve', run_id=run.id) }}" class="stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     {% for p in v.pack %}
     <div class="card">
-      <span class="label">{{ p.platform }}</span>
+      <b>{{ pico(p.platform) }} {{ p.platform }}</b>
       <div class="field"><label for="cap_{{ p.platform }}">Caption</label><textarea id="cap_{{ p.platform }}" name="cap_{{ p.platform }}" maxlength="2200">{{ p.caption }}</textarea></div>
       <div class="field"><label for="tags_{{ p.platform }}">Hashtags</label><input type="text" id="tags_{{ p.platform }}" name="tags_{{ p.platform }}" value="{{ p.hashtags | join(' ') }}"></div>
-      <span class="notice">Best time: {{ p.bestTime }}</span>
-      <span class="notice">{{ p.note }}</span>
+      <small class="notice">Best time: {{ p.bestTime }}</small>
     </div>
     {% endfor %}
-    <div class="field"><label for="publish_at">First post at (UTC)</label><input type="datetime-local" id="publish_at" name="publish_at" value="{{ default_time }}" required></div>
-    <div><button class="primary" type="submit">Approve and schedule</button></div>
+    <div class="field"><label for="publish_at">First post (UTC)</label><input type="datetime-local" id="publish_at" name="publish_at" value="{{ default_time }}" required></div>
+    <small class="notice">One post per channel, 30 min apart, max {{ cap }} per channel per day.</small>
+    <button class="primary go" type="submit">Approve and schedule</button>
   </form>
   {{ redo_form() }}
 </section>
 
 {% else %}
-<section class="panel">
-  <h3>This run is finished</h3>
-  <p class="notice">Its posts are in the queue on the brand page.</p>
-  <div><a class="btn" href="{{ url_for('brand_page', brand_id=brand.id) }}#queue">Open the queue</a></div>
-</section>
+<div class="empty">✅<span>Run finished</span>
+  <a class="btn" href="{{ url_for('brand_page', brand_id=brand.id) }}#queue">Open queue</a></div>
 {% endif %}
 {% endblock %}

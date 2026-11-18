@@ -1,0 +1,18 @@
+{% macro pico(p) %}{{ {'Instagram': '📸', 'TikTok': '🎵', 'YouTube': '▶️', 'Facebook': '👍'}.get(p, '🌐') }}{% endmacro %}
+
+{% macro crew(stage, idle_when_done=False) %}
+{% set order = ['ideas', 'script', 'design', 'pack'] %}
+{% set agents = [('🔭', 'Scout', 'scout'), ('✍️', 'Writer', 'writer'), ('🎨', 'Designer', 'designer'), ('🚀', 'Publisher', 'publisher')] %}
+<div class="crew" role="list">
+  {% for icon, name, key in agents %}
+    {% if stage == 'done' %}{% set st = 'idle' if idle_when_done else 'done' %}
+    {% elif stage in order %}{% set idx = order.index(stage) %}{% set st = 'done' if loop.index0 < idx else ('wait' if loop.index0 == idx else 'idle') %}
+    {% else %}{% set st = 'idle' %}{% endif %}
+    <div class="agent {{ key }} {{ st }}" role="listitem">
+      <div class="ava">{{ icon }}<i class="dot"></i></div>
+      <b>{{ name }}</b>
+      <small>{{ {'idle': 'Idle', 'done': 'Done', 'wait': 'Your turn'}[st] }}</small>
+    </div>
+  {% endfor %}
+</div>
+{% endmacro %}
